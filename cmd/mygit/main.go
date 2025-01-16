@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -70,6 +73,50 @@ func main() {
 
 			defer r.Close()
 
+		}
+	case "hash-object":
+		fileName := os.Args[3]
+		var b bytes.Buffer
+		file, err := os.Open(fileName)
+		if err != nil {
+			fmt.Println("error opening file", file)
+			return
+		}
+		defer file.Close()
+
+		_, err = b.ReadFrom(file)
+		if err != nil {
+			fmt.Println("error reading file", err)
+			return
+		}
+
+		content := b.Bytes()
+		h := sha1.New()
+
+		header := fmt.Sprintf("blob %d\x00", len(content))
+
+		h.Write([]byte(header))
+		h.Write(content)
+
+		hash := h.Sum(nil)
+
+		hashValue := hex.EncodeToString(hash)
+		fmt.Println(hashValue)
+		dirPath := filepath.Join(".git", "objects", hashValue[:2])
+		filePath := filepath.Join(dirPath, hashValue[2:])
+		fileData := []byte(header)
+		fileData = append(fileData, content...)
+		var c bytes.Buffer
+		w := zlib.NewWriter(&c)
+		w.Write(fileData)
+		w.Close()
+		if err := os.MkdirAll(dirPath, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating directory: %s\n", err)
+		}
+		
+
+		if err := os.WriteFile(filePath, c.Bytes(), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
 		}
 
 	default:
