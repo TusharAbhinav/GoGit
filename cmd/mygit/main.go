@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 )
 
 func main() {
@@ -113,10 +114,72 @@ func main() {
 		if err := os.MkdirAll(dirPath, 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "Error creating directory: %s\n", err)
 		}
-		
 
 		if err := os.WriteFile(filePath, c.Bytes(), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing file: %s\n", err)
+		}
+	case "ls-tree":
+		treeHash := os.Args[3]
+		dirName := filepath.Join(".git", "objects", treeHash[:2])
+		fileName := filepath.Join(dirName, treeHash[2:])
+
+		file, err := os.Open(fileName)
+		if err != nil {
+			fmt.Printf("Error opening file: %s\n", fileName)
+			return
+		}
+		defer file.Close()
+
+		var compressed bytes.Buffer
+		_, err = compressed.ReadFrom(file)
+		if err != nil {
+			fmt.Println("Error reading file:", err)
+			return
+		}
+		r, err := zlib.NewReader(&compressed)
+		if err != nil {
+			fmt.Printf("Error decompressing: %v\n", err)
+			return
+		}
+		defer r.Close()
+
+		var content bytes.Buffer
+		_, err = io.Copy(&content, r)
+		if err != nil {
+			fmt.Println("Error reading decompressed data:", err)
+			return
+		}
+
+		data := content.Bytes()
+		nullIndex := bytes.IndexByte(data, 0)
+		treeContents := data[nullIndex+1:]
+
+		var fileOrDirNames []string
+		i := 0
+		for i < len(treeContents) {
+			// Extract mode (ends with a space)
+			modeEnd := bytes.IndexByte(treeContents[i:], ' ')
+			if modeEnd == -1 {
+				fmt.Println("Error parsing tree: mode not found")
+				return
+			}
+			i += modeEnd + 1
+
+			// Extract file or directory name (ends with null byte)
+			nameEnd := bytes.IndexByte(treeContents[i:], 0)
+			if nameEnd == -1 {
+				fmt.Println("Error parsing tree: name not found")
+				return
+			}
+			name := string(treeContents[i : i+nameEnd])
+			fileOrDirNames = append(fileOrDirNames, name)
+
+			// Move past name and 20-byte SHA-1 hash
+			i += nameEnd + 1 + 20
+		}
+		sort.Strings(fileOrDirNames)
+		for _, name := range fileOrDirNames {
+			fmt.Println(name)
 		}
 
 	default:
